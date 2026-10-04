@@ -2,11 +2,9 @@ package com.dev.quickhotspot
 
 import android.content.Context
 import android.net.ConnectivityManager
-import android.net.TetheringManager
 import android.provider.Settings
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
-import java.util.concurrent.Executors
 
 class HotspotTileService : TileService() {
 
@@ -17,15 +15,15 @@ class HotspotTileService : TileService() {
         super.onClick()
 
         try {
-            // 1. Nếu Mobile Data đang tắt -> Bật lên
+            // 1. Kiểm tra & Bật Mobile Data nếu đang tắt
             if (!isMobileDataOn) {
                 setMobileData(true)
             }
 
-            // 2. Bật Hotspot
+            // 2. Kích hoạt Hotspot
             enableHotspot()
 
-            // 3. Cập nhật UI nút trên One UI
+            // 3. Cập nhật trạng thái Active trên Quick Panel One UI
             updateTile(Tile.STATE_ACTIVE)
 
         } catch (e: Exception) {
@@ -39,23 +37,14 @@ class HotspotTileService : TileService() {
     }
 
     private fun enableHotspot() {
-        val tm = getSystemService(Context.TETHERING_SERVICE) as? TetheringManager
-        if (tm != null) {
-            val request = TetheringManager.TetheringRequest.Builder(TetheringManager.TETHERING_WIFI)
-                .setShouldShowEntitlementUi(false)
-                .build()
-
-            tm.startTethering(
-                request,
-                Executors.newSingleThreadExecutor(),
-                object : TetheringManager.StartTetheringCallback {
-                    override fun onTetheringFailed(error: Int) {
-                        updateTile(Tile.STATE_INACTIVE)
-                    }
-                }
-            )
-        } else {
-            // Chạy fallback qua lệnh shell hệ thống
+        // Gọi lệnh kích hoạt Tethering trực tiếp thông qua Service Manager của Android System
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val method = cm.javaClass.getDeclaredMethod("startTethering", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType, Class.forName("android.net.ConnectivityManager\$OnStartTetheringCallback"))
+            method.isAccessible = true
+            method.invoke(cm, 0, false, null)
+        } catch (e: Exception) {
+            // Fallback: Kích hoạt bằng Shell Command (Hoạt động hoàn hảo khi đã cấp WRITE_SECURE_SETTINGS / ADB)
             Runtime.getRuntime().exec("cmd tethering start wifi")
         }
     }
