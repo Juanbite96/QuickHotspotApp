@@ -1,7 +1,9 @@
 package com.dev.quickhotspot
 
 import android.content.Context
+import android.content.Intent
 import android.net.ConnectivityManager
+import android.os.Build
 import android.provider.Settings
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
@@ -15,7 +17,7 @@ class HotspotTileService : TileService() {
         super.onClick()
 
         try {
-            // 1. Kiểm tra & Bật Mobile Data nếu đang tắt
+            // 1. Kiểm tra & Bật Mobile Data ngầm nếu chưa bật
             if (!isMobileDataOn) {
                 setMobileData(true)
             }
@@ -23,7 +25,7 @@ class HotspotTileService : TileService() {
             // 2. Kích hoạt Hotspot
             enableHotspot()
 
-            // 3. Cập nhật trạng thái Active trên Quick Panel One UI
+            // 3. Cập nhật UI nút Cài đặt nhanh
             updateTile(Tile.STATE_ACTIVE)
 
         } catch (e: Exception) {
@@ -33,19 +35,50 @@ class HotspotTileService : TileService() {
     }
 
     private fun setMobileData(enabled: Boolean) {
-        Settings.Global.putInt(contentResolver, "mobile_data", if (enabled) 1 else 0)
+        try {
+            Settings.Global.putInt(contentResolver, "mobile_data", if (enabled) 1 else 0)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun enableHotspot() {
-        // Gọi lệnh kích hoạt Tethering trực tiếp thông qua Service Manager của Android System
+        val context = applicationContext
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+
+        // Thử kích hoạt qua System Method ẩn
+        var success = false
         try {
-            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            val method = cm.javaClass.getDeclaredMethod("startTethering", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType, Class.forName("android.net.ConnectivityManager\$OnStartTetheringCallback"))
-            method.isAccessible = true
-            method.invoke(cm, 0, false, null)
+            val methods = cm.javaClass.declaredMethods
+            for (method in methods) {
+                if (method.name == "startTethering") {
+                    method.isAccessible = true
+                    // Dùng tham số chuẩn của Android System: type 0 (TETHERING_WIFI), showProvisioningIfPossible false
+                    method.invoke(cm, 0, false, null)
+                    success = true
+                    break
+                }
+            }
         } catch (e: Exception) {
-            // Fallback: Kích hoạt bằng Shell Command (Hoạt động hoàn hảo khi đã cấp WRITE_SECURE_SETTINGS / ADB)
-            Runtime.getRuntime().exec("cmd tethering start wifi")
+            e.printStackTrace()
+        }
+
+        // Nếu OS chặn lệnh gọi ngầm hoàn toàn, mở nhanh trang Cài đặt Tethering để chạm bật 1-click
+        if (!success) {
+            val intent = Intent().apply {
+                action = "android.intent.action.MAIN"
+                setClassName("com.android.settings", "com.android.settings.TetherSettings")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            try {
+                startActivityAndCollapse(intent)
+            } catch (e: Exception) {
+                // Fallback chuẩn Android
+                val fallbackIntent = Intent(Settings.ACTION_WIRELESS_SETTINGS).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                startActivityAndCollapse(fallbackIntent)
+            }
         }
     }
 
